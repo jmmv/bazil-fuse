@@ -1144,8 +1144,8 @@ func (c *Conn) writeToKernel(msg []byte) error {
 	out := (*outHeader)(unsafe.Pointer(&msg[0]))
 	out.Len = uint32(len(msg))
 
-	c.wio.RLock()
-	defer c.wio.RUnlock()
+	//c.wio.RLock()
+	//defer c.wio.RUnlock()
 	nn, err := syscall.Write(c.fd(), msg)
 	if err == nil && nn != len(msg) {
 		Debug(bugShortKernelWrite{
@@ -1155,6 +1155,7 @@ func (c *Conn) writeToKernel(msg []byte) error {
 			Stack:   stack(),
 		})
 	}
+	time.Sleep(10 * time.Microsecond)
 	return err
 }
 
