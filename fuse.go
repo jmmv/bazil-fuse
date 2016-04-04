@@ -419,27 +419,76 @@ var bufSize = maxRequestSize + maxWrite
 //
 // Messages in the pool are guaranteed to have conn and off zeroed,
 // buf allocated and len==bufSize, and hdr set.
-var reqPool = sync.Pool{
-	New: allocMessage,
+type reqPoolT struct {
+	lock     sync.Mutex
+	active   int
+	maxSize  int
+	freeList []*message
 }
 
-func allocMessage() interface{} {
+func newReqPool(maxSize int) *reqPoolT {
+	return &reqPoolT{
+		active:   0,
+		maxSize:  maxSize,
+		freeList: make([]*message, 0, maxSize),
+	}
+}
+
+var reqPool = newReqPool(512)
+
+func allocMessage() *message {
 	m := &message{buf: make([]byte, bufSize)}
 	m.hdr = (*inHeader)(unsafe.Pointer(&m.buf[0]))
 	return m
 }
 
 func getMessage(c *Conn) *message {
-	m := reqPool.Get().(*message)
+	reqPool.lock.Lock()
+	defer reqPool.lock.Unlock()
+
+	if reqPool.active > reqPool.maxSize {
+		panic("Uh oh, something went wrong")
+	}
+
+	freeCount := len(reqPool.freeList)
+	if freeCount > 0 {
+		m := reqPool.freeList[freeCount-1]
+		reqPool.freeList = reqPool.freeList[:freeCount-1]
+
+		m.conn = c
+		reqPool.active++
+		return m
+	}
+
+retry:
+	if reqPool.active == reqPool.maxSize {
+		reqPool.lock.Unlock()
+		fmt.Printf("request pool full; waiting\n")
+		time.Sleep(1 * time.Second)
+		reqPool.lock.Lock()
+		goto retry
+	}
+
+	m := allocMessage()
 	m.conn = c
+	reqPool.active++
 	return m
 }
 
 func putMessage(m *message) {
+	reqPool.lock.Lock()
+	defer reqPool.lock.Unlock()
+
+	if reqPool.active <= 0 {
+		panic("Uh oh, something went wrong")
+	}
+
 	m.buf = m.buf[:bufSize]
 	m.conn = nil
 	m.off = 0
-	reqPool.Put(m)
+
+	reqPool.freeList = append(reqPool.freeList, m)
+	reqPool.active--
 }
 
 // a message represents the bytes of a single FUSE message
@@ -1095,8 +1144,8 @@ func (c *Conn) writeToKernel(msg []byte) error {
 	out := (*outHeader)(unsafe.Pointer(&msg[0]))
 	out.Len = uint32(len(msg))
 
-	c.wio.RLock()
-	defer c.wio.RUnlock()
+	//c.wio.RLock()
+	//defer c.wio.RUnlock()
 	nn, err := syscall.Write(c.fd(), msg)
 	if err == nil && nn != len(msg) {
 		Debug(bugShortKernelWrite{
@@ -1106,6 +1155,7 @@ func (c *Conn) writeToKernel(msg []byte) error {
 			Stack:   stack(),
 		})
 	}
+	time.Sleep(10 * time.Microsecond)
 	return err
 }
 

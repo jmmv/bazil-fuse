@@ -403,6 +403,16 @@ func (s *Server) Serve(fs FS) error {
 	})
 	s.handle = append(s.handle, nil)
 
+	quit := make(chan int)
+	reqChan := make(chan fuse.Request, 32)
+	for i := 0; i < 8; i++ {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.serveWorker(i, reqChan, quit)
+		}()
+	}
+
 	for {
 		req, err := s.conn.ReadRequest()
 		if err != nil {
@@ -411,13 +421,10 @@ func (s *Server) Serve(fs FS) error {
 			}
 			return err
 		}
-
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
-			s.serve(req)
-		}()
+		reqChan <- req
 	}
+
+	quit <- 1
 	return nil
 }
 
@@ -757,6 +764,17 @@ func (e handleNotReaderError) Errno() fuse.Errno {
 
 func initLookupResponse(s *fuse.LookupResponse) {
 	s.EntryValid = entryValidTime
+}
+
+func (c *Server) serveWorker(id int, reqChan chan fuse.Request, quit chan int) {
+	for {
+		select {
+		case req := <-reqChan:
+			c.serve(req)
+		case <-quit:
+			return
+		}
+	}
 }
 
 func (c *Server) serve(r fuse.Request) {
