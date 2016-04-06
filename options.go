@@ -150,6 +150,15 @@ func MaxReadahead(n uint32) MountOption {
 	}
 }
 
+// Async enables asynchronous mounts.
+func Async() MountOption {
+	return func(conf *mountConfig) error {
+		conf.options["async"] = ""
+		conf.options["nosyncwrites"] = ""
+		return nil
+	}
+}
+
 // AsyncRead enables multiple outstanding read requests for the same
 // handle. Without this, there is at most one request in flight at a
 // time.
