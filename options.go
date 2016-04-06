@@ -2,6 +2,7 @@ package fuse
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 )
 
@@ -165,6 +166,15 @@ func Async() MountOption {
 func AsyncRead() MountOption {
 	return func(conf *mountConfig) error {
 		conf.initFlags |= InitAsyncRead
+		return nil
+	}
+}
+
+// DaemonTimeout configures the time the kernel will wait for the deamon
+// to reply before force-ejecting the volume.
+func DaemonTimeout(seconds int) MountOption {
+	return func(conf *mountConfig) error {
+		conf.options["daemon_timeout"] = strconv.Itoa(seconds)
 		return nil
 	}
 }
